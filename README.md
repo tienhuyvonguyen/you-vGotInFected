@@ -2,7 +2,7 @@
 
 Tested on 2 samples: Easy_Crackme.exe and targetProgram.exe, already included in the repo.
 
-*Usage*
+*Usage:*
 you-vGotInFected.exe <file/directory>
 
 Process include 2 phases:
