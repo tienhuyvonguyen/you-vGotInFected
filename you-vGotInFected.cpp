@@ -454,7 +454,7 @@ int main(int argc, char* argv[]) {
 		case 5:
 			LPCSTR filename = argv[1];
 			const char* sectionName = ".haha";
-			removeCodeFromSection(argv[1], sectionName);
+			removeCode(argv[1], sectionName);
 			break;
 		}
 	}
