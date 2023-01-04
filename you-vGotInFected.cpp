@@ -10,8 +10,6 @@
 #include <sys/stat.h>
 #pragma comment(lib, "User32.lib")
 
-// define global variable for entry point 
-
 DWORD align(DWORD size, DWORD align, DWORD addr) {
 	if (!(size % align))
 		return addr + size;
@@ -370,6 +368,89 @@ void getFilePath(std::vector<std::string>& files, std::string directory) {
 	}
 }
 
+void printSectionHeaders(PIMAGE_SECTION_HEADER pSectionHeader, PIMAGE_FILE_HEADER pFileHeader) {
+	printf("=== Section Table ===\n");
+	printf("Section name|\tVirtual size|\tVirtual address|\tRaw size|\tRaw address|\tCharacteristics|\n");
+	for (int i = 0; i < pFileHeader->NumberOfSections; i++)
+	{
+
+		printf("%s\t%15X\t%15X\t%22X\t%19X\t%15X\n", pSectionHeader[i].Name
+			, pSectionHeader[i].Misc.VirtualSize
+			, pSectionHeader[i].VirtualAddress
+			, pSectionHeader[i].SizeOfRawData
+			, pSectionHeader[i].PointerToRawData
+			, pSectionHeader[i].Characteristics);
+	}
+	printf("\n");
+}
+
+void printHeaders(PIMAGE_OPTIONAL_HEADER pOptionalHeader) {
+	printf("Address of entry point : %08X\n", pOptionalHeader->AddressOfEntryPoint);
+	printf("Checksum : %08X\n", pOptionalHeader->CheckSum);
+	printf("Image base from %08X to %08X\n", pOptionalHeader->ImageBase, pOptionalHeader->ImageBase + pOptionalHeader->SizeOfImage);
+	printf("Image base : %08X \n", pOptionalHeader->ImageBase);
+	printf("File alignment : %08X\n", pOptionalHeader->FileAlignment);
+	printf("Size of image : %08X\n", pOptionalHeader->SizeOfImage);
+	printf("\n");
+}
+bool DumpPEHeader(LPCSTR filename)
+{
+	HANDLE hFile;
+	HANDLE hFileMapping;
+	LPVOID lpFileBase;
+	PIMAGE_DOS_HEADER pDosHeader;
+	PIMAGE_NT_HEADERS pNTHeader;
+	PIMAGE_FILE_HEADER pFileHeader;
+	PIMAGE_OPTIONAL_HEADER pOptionalHeader;
+	PIMAGE_SECTION_HEADER pSectionHeader;
+	PIMAGE_IMPORT_DESCRIPTOR pImportDescriptor;
+	PIMAGE_EXPORT_DIRECTORY pExportDirectory;
+	try {
+		// open the file for reading
+		hFile = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hFile == INVALID_HANDLE_VALUE)
+			throw "CreateFile() failed";
+
+		// create a file mapping object
+		hFileMapping = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+		if (hFileMapping == NULL)
+			throw "CreateFileMapping() failed";
+
+		// map a view of the file
+		lpFileBase = MapViewOfFile(hFileMapping, FILE_MAP_READ, 0, 0, 0);
+		if (lpFileBase == NULL)
+			throw "MapViewOfFile() failed";
+
+		// get a pointer to the DOS header
+		pDosHeader = (PIMAGE_DOS_HEADER)lpFileBase;
+
+		// check the magic number
+		if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+			throw "Not a valid executable file";
+
+		// get a pointer to the NT (PE) header
+		pNTHeader = (PIMAGE_NT_HEADERS)((LPBYTE)lpFileBase + pDosHeader->e_lfanew);
+
+		// check the signature
+		if (pNTHeader->Signature != IMAGE_NT_SIGNATURE)
+			throw "Not a valid PE file";
+
+		// get pointers to the sections
+		pFileHeader = &pNTHeader->FileHeader;
+		pOptionalHeader = &pNTHeader->OptionalHeader;
+		pSectionHeader = IMAGE_FIRST_SECTION(pNTHeader);
+
+		// print the file sections
+		printSectionHeaders(pSectionHeader, pFileHeader);
+		printHeaders(pOptionalHeader);
+		return true;
+	}
+	catch (LPCSTR msg) {
+		printf("Error: %s\n", msg);
+		return false;
+	}
+}
+
 void menu() {
 	std::cout << "1. Add Section" << std::endl;
 	std::cout << "2. PE Injection" << std::endl;
@@ -448,7 +529,7 @@ int main(int argc, char* argv[]) {
 		}
 		case 4: {
 			std::cout << "[!] Dumping PE File Information" << std::endl;
-			
+			DumpPEHeader(argv[1]);
 			break;
 		}
 		case 5:
