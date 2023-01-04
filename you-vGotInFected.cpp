@@ -377,7 +377,15 @@ int main(int argc, char* argv[]) {
 				printf("Error injecting code!\n");
 			break;
 		}
-
+		case 3: {
+			std::cout << "Injecting Code ..." << std::endl;
+			bool injectRes = AddCodeToSection(filename, sectionName);
+			if (injectRes)
+				printf("Code injected!\n");
+			else
+				printf("Error injecting code!\n");
+			break;
+		}
 			  
 		}
 	}
