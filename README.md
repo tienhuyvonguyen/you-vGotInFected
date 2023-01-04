@@ -1,6 +1,6 @@
 # you-vGotInFected
 * Because of having asm code inside, I recommended to download and use the file in release section instead of compiling yourself.
-Tested on 2 samples: Easy_Crackme.exe and targetProgram.exe, already included in the repo.
+* Tested on 2 samples: Easy_Crackme.exe and targetProgram.exe, already included in the repo.
 
 *Usage:*
 you-vGotInFected.exe <file/directory>
