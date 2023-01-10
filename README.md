@@ -3,7 +3,7 @@
 * Tested on 2 samples: Easy_Crackme.exe and targetProgram.exe, already included in the repo.
 
 *Usage:*
-you-vGotInFected.exe <file/directory>
+you-vGotInFected.exe 
 
 Process include 2 phases:
 1. Add a new section to the target PE file
