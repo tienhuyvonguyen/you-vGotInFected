@@ -2,8 +2,8 @@
 * Because the code contain asm inside, I recommended to download and use the file in release section instead of compiling yourself or open .sln file with visual studio then compile.
 * Tested on 2 samples: Easy_Crackme.exe and targetProgram.exe, already included in the repo.
 
-*Usage:*
-you-vGotInFected.exe 
+Usage: run file
+*you-vGotInFected.exe* 
 
 Process include 2 phases:
 1. Add a new section to the target PE file
